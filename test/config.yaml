@@ -1,0 +1,15 @@
+addr:                172.26.10.143:21
+user:                Dq
+password:            Sickness2020
+dbConnStr:           oracle://tcysert:oracle_4U@172.26.20.89:1521/KAZANTST
+networkBasePath:     C:/Users/TCYSERT/Desktop/pgm
+networkToUploadPath: Gidecek
+networkOutgoingPath: Giden
+networkIncomingPath: Gelen
+ftpWritePath:        /Polis_Giden
+ftpReadPath:         /Polis_Gelen
+poolInterval:        5s
+heartbeatInterval:   1s
+logFilePath: C:/Users/TCYSERT/Desktop/pgm/log.txt
+logLevel: -4
+lokiPushURl: http://localhost:3100/loki/api/v1/push
