@@ -14,7 +14,7 @@ func ReadConfig() error {
 	v := viper.New()
 	v.SetConfigName("config")
 	v.SetConfigType("yaml")
-	v.AddConfigPath("/etc/pgm")     // linux config dir.
+	v.AddConfigPath("/etc/file_service")     // linux config dir.
 	v.AddConfigPath("./demo_sunum") // optionally, look for config in the working dir.
 	err := v.ReadInConfig()         // find and read the config file
 
