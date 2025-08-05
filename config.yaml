@@ -1,0 +1,15 @@
+addr:                
+user:                
+password:            
+dbConnStr:           
+networkBasePath:     
+networkToUploadPath: Gidecek
+networkOutgoingPath: Giden
+networkIncomingPath: Gelen
+ftpWritePath:        
+ftpReadPath:         
+poolInterval:        5s
+heartbeatInterval:   1s
+logFilePath: 
+logLevel: -4
+lokiPushURl: 
