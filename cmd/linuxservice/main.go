@@ -9,12 +9,17 @@ import (
 	"pgm/pkg/file_service"
 	"pgm/pkg/file_service/config"
 	"pgm/pkg/file_service/repo"
+	"pgm/pkg/file_service/server"
 )
 
-// note: can we do network lvl mutex to run two file_service service. atomic access to files.
-// todo: write better error message make them more descriptive
-// implement default options and config vars
+const host = "0.0.0.0:9096"
+
+// TODO: write better error message make them more descriptive
+// TODO: default options and config vars
 func main() {
+	server := server.New(host)
+	server.Run()
+
 	path := flag.String("config.path", "", "config path for pgm")
 	flag.Parse()
 
@@ -23,12 +28,8 @@ func main() {
 		slog.Error(fmt.Errorf("filesync: error reading config file %w", err).Error())
 		return
 	}
-	logFile, err := os.OpenFile(cfg.LogFilePath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0644)
-	if err != nil {
-		slog.Error(err.Error())
-		os.Exit(1)
-	}
-	logger := slog.New(slog.NewJSONHandler(logFile, &slog.HandlerOptions{Level: cfg.LogLevel, AddSource: true}))
+
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.LogLevel, AddSource: true}))
 
 	r, err := repo.NewPGMRepo(cfg.DBConnStr)
 	if err != nil {

@@ -6,7 +6,6 @@ import (
 	"crypto/sha1"
 	"errors"
 	"fmt"
-	walker "github.com/YusufSert/walker"
 	"io"
 	"log/slog"
 	"os"
@@ -20,17 +19,20 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	walker "github.com/YusufSert/walker"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 // todo: check osPipe, ioTeeReader
 
 type PGM struct {
-	ftp      *filetransfer.FTP
-	r        *repo.PGMRepo
-	l        *slog.Logger
-	renameFn func(name string) string
-	cfg      *config.PGMConfig
-
+	ftp               *filetransfer.FTP
+	r                 *repo.PGMRepo
+	l                 *slog.Logger
+	renameFn          func(name string) string
+	cfg               *config.PGMConfig
+	metrics           *metrics
 	mu                sync.Mutex //protects the following fields
 	maxTimeoutStopped int64      // Total number of workers stopped due to timout.
 	errStopped        int64      // Total number of workers stopped due to err.
@@ -44,16 +46,17 @@ func NewPGMService(cfg *config.PGMConfig, r *repo.PGMRepo, l *slog.Logger) (*PGM
 	}
 
 	return &PGM{
-		ftp: f,
-		cfg: cfg,
-		l:   l,
-		r:   r,
+		ftp:     f,
+		cfg:     cfg,
+		l:       l,
+		r:       r,
+		metrics: newMetrics(prometheus.DefaultRegisterer),
 	}, nil
 }
 
 func (s *PGM) Run(ctx context.Context) error {
 	errLocal := s.monitor(ctx, s.syncLocal, "syncLocal")
-	//s.cfg.NetworkToUploadPath this dir should be created before starting the file_service
+	//BUG: s.cfg.NetworkToUploadPath this dir should be created before starting the file_service
 	errServer := s.monitor(ctx, s.syncServer, "syncServer")
 
 	var err error
@@ -182,6 +185,7 @@ func (s *PGM) syncLocal(ctx context.Context, d time.Duration) (<-chan struct{}, 
 				}
 
 				logger.Info("file_service: file synced", "ftp_file_name", i.Name(), "network_name", f.Name())
+				s.metrics.fileSyncs.With(prometheus.Labels{"mode": "local"}).Inc()
 			}
 			if !poolTimer.Stop() {
 				select {
@@ -286,6 +290,7 @@ func (s *PGM) syncServer(ctx context.Context, d time.Duration) (<-chan struct{},
 				}
 
 				logger.Info("file_service: file synced", "network_name", f.Name(), "ftp_name", i.Name())
+				s.metrics.fileSyncs.With(prometheus.Labels{"mode": "server"}).Inc()
 			}
 			if !poolTimer.Stop() {
 				select {
@@ -321,12 +326,13 @@ func (s *PGM) monitor(ctx context.Context, fn worker, wName string) <-chan error
 			workerHeartbeat, workerErrCh = fn(dctx, s.cfg.PoolInterval)
 		}
 		startWorker()
+		s.metrics.livedWorkers.Inc()
 
-		timeout := time.NewTimer(5 * time.Second)
+		timeout := time.NewTimer(10 * time.Second)
 		for {
 			select {
 			case <-workerHeartbeat:
-				logger.Debug("file_service: receiving heartbeat from worker")
+				s.metrics.worker_heartbeat.With(prometheus.Labels{"mode": wName}).Set(float64(time.Now().Unix()))
 			case <-timeout.C:
 				logger.Warn("file_service: heartbeat timeout, unhealthy goroutine; restarting worker")
 
@@ -336,6 +342,7 @@ func (s *PGM) monitor(ctx context.Context, fn worker, wName string) <-chan error
 
 				cancel()
 				startWorker()
+				s.metrics.livedWorkers.Inc()
 			case err := <-workerErrCh:
 				// dont send the error directly check if retryable error.
 				// if not retryable error stops monitoring.
@@ -359,6 +366,7 @@ func (s *PGM) monitor(ctx context.Context, fn worker, wName string) <-chan error
 
 				logger.Info("file_service: restarting worker")
 				startWorker()
+				s.metrics.livedWorkers.Inc()
 
 			case <-ctx.Done(): // parent context will cancel the child ctx, no deed to explicitly call cancel() on the child ctx
 				errCh <- ctx.Err()
@@ -537,6 +545,34 @@ func (e *ServiceError) Error() string {
 
 func (e *ServiceError) Unwrap() error { return e.Err }
 
-func (s *PGM) alertIncomingFile() {
-	panic("not implemented!")
+type metrics struct {
+	fileSyncs        prometheus.CounterVec
+	worker_heartbeat prometheus.GaugeVec
+	livedWorkers     prometheus.Counter
+}
+
+func newMetrics(reg prometheus.Registerer) *metrics {
+	m := metrics{
+		fileSyncs: *prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Subsystem: "sync_service",
+				Name:      "file_sync_total",
+				Help:      "Total number of file synced",
+			}, []string{"mode"},
+		),
+		worker_heartbeat: *prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Subsystem: "sync_service",
+				Name:      "worker_hearbeat",
+				Help:      "Unix timestamp of the last hearbeat",
+			}, []string{"mode"}),
+		livedWorkers: prometheus.NewCounter(
+			prometheus.CounterOpts{
+				Subsystem: "sync_service",
+				Name:      "lived_workers_total",
+				Help:      "Total number of created workers",
+			}),
+	}
+	reg.MustRegister(m.fileSyncs, m.worker_heartbeat, m.livedWorkers)
+	return &m
 }
